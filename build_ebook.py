@@ -1,3 +1,4 @@
+#!/usr/bin/python
 """Generate EPUB and PDF ebooks from sources."""
 
 from datetime import datetime
@@ -110,11 +111,13 @@ def generate_markdown_chapter(
 
     # Adjust titles based on depth of chapter itself
     if chapter.depth > 0:
-
         def adjust_title_depth(match: Match) -> str:
             return ("#" * chapter.depth) + match.group(0)
 
         contents = re.sub(r"#+ ", adjust_title_depth, contents)
+
+    # Remove `C++ code` links
+    contents = re.sub(r"\[C\+\+ code\](.*)", "", contents)
 
     # Fix image links
     contents = contents.replace("/images/", f"{converted_image_dir.as_posix()}/")
@@ -151,42 +154,46 @@ def compile_full_markdown(
     return markdown_file
 
 
-def build_pdf(markdown_file: Path, pdf_file: Path, args: argparse.Namespace) -> Path:
+def build_pdf(markdown_file: Path, tmp_dir: Path, lang: str, args: argparse.Namespace) -> Path:
     """Build combined Markdown file into a PDF."""
 
-    try:
-        subprocess.check_output(["xelatex", "--version"])
-    except FileNotFoundError:
-        raise RuntimeError(f"failed to build {pdf_file}: xelatex not installed")
+    pdf_file = tmp_dir / f"{lang}.pdf"
+    ebook_dir = Path("ebook")
 
     try:
-        keys_values = [(arg, getattr(args, arg)) for arg in vars(args)]
-        opts = [f"{key}={val}" for key, val in keys_values if val != ""]
-        pandoc_args = [x for i in opts for x in ("-V", i)]
+        typst_file1 = tmp_dir / f"{lang}.typ"
 
+        # Initial file
         subprocess.check_output(
             [
                 "pandoc",
                 markdown_file.as_posix(),
-                "-V",
-                "documentclass=report"
-            ]
-            +
-            pandoc_args
-            +
-            [
-                "-t",
-                "latex",
-                "-s",
-                "--toc",
-                "--listings",
-                "-H",
-                "ebook/listings-setup.tex",
                 "-o",
-                pdf_file.as_posix(),
-                "--pdf-engine=xelatex",
+                typst_file1.as_posix(),
             ]
         )
+
+        # Add preamble
+        ps = subprocess.Popen(
+            [
+                "cat",
+                (ebook_dir / Path("preamble.typ")).as_posix(),
+                (ebook_dir / Path("beginning.typ")).as_posix(),
+                typst_file1.as_posix(),
+            ],
+            stdout=subprocess.PIPE
+        )
+
+        subprocess.check_output(
+            [
+                "typst",
+                "compile",
+                "-",
+                pdf_file.as_posix()
+            ],
+            stdin=ps.stdout
+        )
+
     except CalledProcessError as e:
         raise RuntimeError(
             f"failed to build {pdf_file}: pandoc failed: {e.output.decode()}"
@@ -195,55 +202,34 @@ def build_pdf(markdown_file: Path, pdf_file: Path, args: argparse.Namespace) -> 
     return pdf_file
 
 
-def build_epub(markdown_file: Path, epub_file: Path) -> Path:
-    try:
-        subprocess.check_output(
-            [
-                "pandoc",
-                markdown_file.as_posix(),
-                "--toc",
-                "-o",
-                epub_file.as_posix(),
-                "--epub-cover-image=ebook/cover.png",
-            ]
-        )
-    except CalledProcessError as e:
-        raise RuntimeError(
-            f"failed to build {epub_file}: pandoc failed: {e.output.decode()}"
-        )
-
-    return epub_file
-
 def main() -> None:
     parser = make_parser()
     args = parser.parse_args(sys.argv[1:])
-    
-    """Build ebooks."""
-    with TemporaryDirectory() as raw_out_dir:
-        out_dir = Path(raw_out_dir)
 
-        logging.info("converting svg images to png...")
-        converted_image_dir = convert_images(
-            Path("images"), out_dir / "converted_images"
+    """Build ebooks."""
+    raw_out_dir = Path("./tmp/")
+    raw_out_dir.mkdir(parents=True, exist_ok=True)
+
+    out_dir = Path(raw_out_dir)
+
+    logging.info("converting svg images to png...")
+    converted_image_dir = convert_images(
+        Path("images"), out_dir / "converted_images"
+    )
+
+    languages = json.loads(Path("config.json").read_text())["languages"].keys()
+    logging.info(f"building ebooks for languages {'/'.join(languages)}")
+
+    for lang in languages:
+        logging.info(f"{lang}: generating markdown...")
+        markdown_file = compile_full_markdown(
+            Path(lang), out_dir / f"{lang}.md", converted_image_dir
         )
 
-        languages = json.loads(Path("config.json").read_text())["languages"].keys()
-        logging.info(f"building ebooks for languages {'/'.join(languages)}")
+        logging.info(f"{lang}: building pdf...")
+        pdf_file = build_pdf(markdown_file, out_dir, lang, args)
 
-        for lang in languages:
-            logging.info(f"{lang}: generating markdown...")
-            markdown_file = compile_full_markdown(
-                Path(lang), out_dir / f"{lang}.md", converted_image_dir
-            )
-
-            logging.info(f"{lang}: building pdf...")
-            pdf_file = build_pdf(markdown_file, out_dir / f"{lang}.pdf", args)
-
-            logging.info(f"{lang}: building epub...")
-            epub_file = build_epub(markdown_file, out_dir / f"{lang}.epub")
-            
-            shutil.copy(pdf_file, f"ebook/vulkan_tutorial_{lang}.pdf")
-            shutil.copy(epub_file, f"ebook/vulkan_tutorial_{lang}.epub")
+        shutil.copy(pdf_file, f"ebook/vulkan_tutorial_{lang}.pdf")
 
     logging.info("done")
 
