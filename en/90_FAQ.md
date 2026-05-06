@@ -20,9 +20,10 @@ installed by following the "Verify the Installation" instructions [on this page]
 
 This appears to be a compatibility problem in the Steam client beta. There are a
 few possible workarounds:
-    * Opt out of the Steam beta program.
-    * Set the `DISABLE_VK_LAYER_VALVE_steam_overlay_1` environment variable to `1`
-    * Delete the Steam overlay Vulkan layer entry in the registry under `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ImplicitLayers`
+
+* Opt out of the Steam beta program.
+* Set the `DISABLE_VK_LAYER_VALVE_steam_overlay_1` environment variable to `1`
+* Delete the Steam overlay Vulkan layer entry in the registry under `HKEY_LOCAL_MACHINE\SOFTWARE\Khronos\Vulkan\ImplicitLayers`
 
 Example:
 
